@@ -1,0 +1,288 @@
+"""
+LOBO 1 - corrector de textos que usam a "nova norma ortográfica" para
+a norma ortográfica anterior. (simple spellcorrector in Python 3)
+
+Copyright [2018] [J. Manuel Caeiro D. P.]
+
+Licensed under the Academic Free License version 3.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+           https://opensource.org/licenses/AFL-3.0
+"""
+import re
+import PyPDF2
+import docx
+from docx import Document
+import zipfile
+import xml.dom.minidom
+import ezodf
+from bs4 import BeautifulSoup
+import lxml
+import ebooklib
+from ebooklib import epub
+from tkinter import *
+import tkinter.filedialog
+import tkinter as tk
+
+wordlist1 = 'wordlistao.txt'
+wordlist2 = 'wordlistcr.txt'
+repls = {'[ ':'[', '( ':'(', '/ ':'/', '- ':'-'}
+
+def make_dictionary(wordlist1, wordlist2):
+    """Creates a dictionary from wordlists in 2 files. Wordlists
+    have the same number of (corresponding) words, line by line.
+    input: wordlist1 contains the words to be replaced; wordlist 2
+    contains the words to replace them.
+    return: a dictionary with pair of corresponding words.
+    """
+    with open(wordlist1) as f1, open(wordlist2) as f2:
+        dicio = dict([s1.strip(), s2.strip()] for s1, s2
+                     in zip(f1, f2))
+    return dicio
+
+def correct_txt_text(filepath, filename_r, dicio):
+    """Reads a text file, changes some words; creates and writes a
+    new text file with the changed text.
+    input: a .txt file with the text to correct.
+    output: a new .txt file with the text corrected.
+    """
+    fr = open(filepath)
+    filename_w = 'new-' + filename_r
+    fw = open(filename_w, 'w')
+    textlist = []
+    for line in fr.readlines():
+        worklist = re.findall(r"[\w']+|[-.;!?:,/()%*]", line)
+        correct = [dicio[w] if w in dicio else w for w in worklist]
+        punct = set('.,;:?!-/%)]ªº')
+        corrected = ''.join(p if set(p) <= punct
+                            else ' '+p for p in correct).strip()
+        for k in repls.keys():
+            corrected = corrected.replace(k, repls[k])
+        textlist.append(corrected + '\n')
+    fw = open(filename_w, 'r+')
+    fw.writelines(textlist)
+        
+    fr.close(); fw.close()
+
+def correct_pdf_text(filepath, filename_r, dicio):
+    """Reads a pdf file, changes some words; creates and writes a
+    text file with the changed text. (only the text)
+    input: a .pdf file with the text to correct.
+    output: a .txt file with the corrected text.
+    """
+    pdfFileObj = open(filepath, 'rb')
+    pdfReader = PyPDF2.PdfFileReader(pdfFileObj, strict=False)
+    numPages = pdfReader.getNumPages()
+    filename_w = filename_r + '.txt'
+    ft = open(filename_w, 'w')
+    pages = []
+    for pageNum in range(pdfReader.numPages):
+        pageObj = pdfReader.getPage(pageNum)
+        pageContent = pageObj.extractText()
+        clean = re.findall(r"[\w]+|[^\s\w]", pageContent)
+        correct = [dicio[w] if w in dicio else w for w in clean]
+        pages.append(correct)
+    joinpages = sum(pages, [])
+    punct = set('.,;:?!-/%)]ªº')
+    cleantext = ''.join(p if set(p) <= punct else ' '+p for p in joinpages).strip()
+    for k in repls.keys():
+        cleantext = cleantext.replace(k, repls[k])
+    ft = open(filename_w, 'r+', 1, 'utf-16')
+    ft.write(cleantext)
+    
+    pdfFileObj.close(); ft.close()
+
+def correct_docx_text(filepath, filename_r, dicio):
+    """Reads a docx file, changes some words; creates and writes a
+    new docx file with the changed text. (only the text)
+    input: a .docx file with the text to correct.
+    output: a new .docx file with the corrected text.
+    """
+    doc = docx.Document(filepath)
+    filename_w = 'new-' + filename_r
+    newdoc = docx.Document()
+    for par in doc.paragraphs:
+        text = par.text
+        worklist = re.findall(r"[\w]+|[^\s\w]", text)
+        correct = [dicio[w] if w in dicio else w for w in worklist]
+        punct = set('.,;:?!-/%)]ªº')
+        corrected = ''.join(p if set(p) <= punct else ' '+p for p in correct).strip()
+        for k in repls.keys():
+            corrected = corrected.replace(k, repls[k])
+        newdoc.add_paragraph(corrected)
+    
+    newdoc.save(filename_w)
+
+def correct_odt_text(filepath, filename_r, dicio):
+    """Reads an odt file, changes some words; creates and writes a
+    new odt file with the changed text. (only the text)
+    input: a .odt file with the text to correct.
+    output: a new .odt file with the corrected text.
+    """
+    zf = zipfile.ZipFile(filepath,"r")
+    con = zf.read('content.xml')
+    doc = xml.dom.minidom.parseString(con)
+    pars = doc.getElementsByTagName('text:p')
+    filename_w = 'new-' + filename_r
+    newdoc = ezodf.newdoc('odt', filename_w)
+    for par in pars:
+        for ch in par.childNodes:
+            if ch.nodeType == ch.TEXT_NODE:
+                text = ch.data
+                worklist = re.findall(r"[\w]+|[^\s\w]", text)
+                correct = [dicio[w] if w in dicio else w for w in worklist]
+                punct = set('.,;:?!-/%)]ªº')
+                corrected = ''.join(p if set(p) <= punct else ' '+p for p in correct).strip()
+                for k in repls.keys():
+                    corrected = corrected.replace(k, repls[k])
+                newdoc.body.append(ezodf.Paragraph(corrected))
+    
+    newdoc.save()
+
+def correct_html_text(filepath, filename_r, dicio):
+    """Reads a html file, changes some words; creates and writes a
+    new html file with the changed text. (only the text)
+    input: a .html file with the text to correct.
+    output: a new .html file with the corrected text.
+    """
+    html_doc = open(filepath)
+    soup = BeautifulSoup(html_doc, 'lxml')
+    text = soup.get_text()
+    worklist = re.findall(r"[\w]+|[^\s\w]", text)
+    correct = [dicio[w] if w in dicio else w for w in worklist]
+    punct = set('.,;:?!-/%)]ªº')
+    corrected = ''.join(p if set(p) <= punct else ' '+p for p in correct).strip()
+    for k in repls.keys():
+        corrected = corrected.replace(k, repls[k])
+    filename_w = 'new-' + filename_r
+    new_doc = open(filename_w, 'w', 1, 'utf-16')
+    new_doc.write(corrected)
+    
+    html_doc.close(), new_doc.close()
+
+def correct_epub_text(filepath, filename_r, dicio):
+    """Reads a epub file, changes some words; creates and writes a
+    text file with the changed text. (only the text)
+    input: a .epub file with the text to correct.
+    output: a .txt file with the corrected text.
+    """
+    book = epub.read_epub(filepath)
+    filename_w = filename_r + '.txt'
+    f = open(filename_w, 'w')
+    for chapter in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+        bytes = chapter.get_body_content()
+        soup = BeautifulSoup(bytes, 'html.parser')
+        text = soup.get_text()
+        worklist = re.findall(r"[\w]+|[^\s\w]", text)
+        correct = [dicio[w] if w in dicio else w for w in worklist]
+        punct = set('.,;:?!-/%)]ªº')
+        corrected = ''.join(p if set(p) <= punct else ' '+p for p in correct).strip()
+        for k in repls.keys():
+            corrected = corrected.replace(k, repls[k])
+        f = open(filename_w, 'a')
+        f.write(corrected)
+    
+    f.close()
+
+# Create minimalistic GUI with tkinter.
+# Button to get filepath.
+filepath = ''
+def callback():
+    global filepath
+    filepath = tkinter.filedialog.askopenfilename()
+    inst.destroy()
+inst = Tk()
+Button(inst, text='Abrir ficheiro', command=callback).pack(fill=X)
+# Text window left side with logo.
+root = Toplevel()
+text1 = Text(root, height=30, width=15)
+text1.insert(END,'\n\n\n\n'' ')
+photo = PhotoImage(file='./OrderChristCross-100px-logo1.png')
+text1.tag_configure('big', foreground='#906c28',
+                        font=('Tempus Sans ITC', 26, 'bold'))
+text1.tag_configure('bold_italics', font=('Arial', 12, 'bold', 'italic'))
+text1.image_create(END, image=photo)
+text1.pack(side=LEFT)
+text1.insert(END,'\nLOBO 1\n', 'big')
+text1.insert(END, ''' modificador
+ ortográfico
+ para pré-AO90
+ [ pt-PT ]
+ v. 0.1.0-beta\n''', 'follow')
+# Text window righty side.
+text2 = Text(root, height=30, width=50)
+scroll = Scrollbar(root, command=text2.yview)
+text2.configure(yscrollcommand=scroll.set)
+text2.tag_configure('color', font=('Verdana', 10))
+text2.tag_bind('follow', '<1>', lambda e,
+                   t=text2: t.insert(END, "Not now, maybe later!"))
+info = """
+ O LOBO corrige, na medida do possível, textos escritos
+ com a ortografia do AO90 para a ortografia anterior, em
+ documentos de formato electrónico.
+    
+ O LOBO lê texto em ficheiros com diversos formatos,
+ corrige-o e escreve-o num novo ficheiro com o mesmo
+ formato , se possível, ou em formato mais simples.
+    
+ O LOBO lê, processa e escreve entre ficheiros com as
+ seguintes extensões:
+     docx --> docx | odt --> odt | pdf --> txt
+     epub --> txt | html --> html | txt --> txt
+      
+ COMO USAR:
+ - Clique no botão 'Abrir ficheiro';
+ - Navegue na janela de busca até encontar o ficheiro;
+ - Seleccione e abra-o. (Tudo o mais será automático.)
+    
+ Na pasta do LOBO irá aparecer um novo ficheiro com
+ nome semelhante e com o texto modificado/corrigido.
+"""
+text2.insert(END, info, 'color')
+disclaim = """                   ***
+ Limitações desta versão inicial do programa:
+ - Abre e processa apenas um ficheiro de cada vez.
+ - Lê, modifica e grava somente o texto dos
+ documentos originais, não os reconstitui.
+ - Não lê alguns 'pdf' resultantes de conversões a
+ partir de outros formatos de texto.
+ - Não tem capacidade para processar correctamente
+ páginas 'web', só documentos com extensão 'html'.
+    
+ (Para corrigir textos em páginas 'web' instale as
+ extensões existentes para o Chrome e o Firefox.)
+"""
+text2.insert(END, disclaim, 'follow')
+text2.pack(side=LEFT)
+scroll.pack(side=RIGHT, fill=Y)
+mainloop()
+# Get filename and file extension from filepath.
+print(filepath)
+filename_r = filepath.split('/')[-1]
+print(filename_r)
+ext = filename_r.split('.')[-1]
+print(ext)
+dicio = make_dictionary(wordlist1, wordlist2)
+# Select function using file extension type.
+if ext == 'txt' or ext == 'TXT':
+    correct_txt_text(filepath, filename_r, dicio)
+elif ext == 'pdf' or ext == 'PDF':
+    correct_pdf_text(filepath, filename_r, dicio)
+elif ext == 'docx' or ext == 'DOCX':
+    correct_docx_text(filepath, filename_r, dicio)
+elif ext == 'odt' or ext == 'ODT':
+    correct_odt_text(filepath, filename_r, dicio)
+elif ext == 'html' or ext == 'HTML' or ext == 'htm' or ext == 'HTM':
+    correct_html_text(filepath, filename_r, dicio)
+elif ext == 'xml' or ext == 'XML':
+    correct_html_text(filepath, filename_r, dicio)
+elif ext == 'epub' or ext == 'EPUB':
+    correct_epub_text(filepath, filename_r, dicio)
+else:
+    # On fail message window.
+    master = tk.Tk()
+    warning = "Algo impede o acesso ao seu ficheiro."
+    msg = tk.Message(master, text = warning)
+    msg.config(bg='PaleVioletRed1', font=('Helvetica', 20, 'italic'))
+    msg.pack()
+
